@@ -1,57 +1,131 @@
-from pathlib import Path
+import base64
 from fastapi import HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+import httpx
 from jose import JWTError, jwt
-from datetime import datetime, timedelta, timezone
-import os
-from dotenv import load_dotenv
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from app.config import settings
 
-env_path = Path(__file__).resolve().parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+_jwks_cache = None
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = os.getenv("ALGORITHM")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
-REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS"))
+# Hàm lấy JWKS từ Keycloak
+async def get_jwks():
+    global _jwks_cache
+    if _jwks_cache is None:    
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/certs")
+                response.raise_for_status() # Kiểm tra lỗi HTTP
+                jwks = response.json()
+                print(f"JWKS fetched: {len(jwks.get('keys', []))} keys")
+                _jwks_cache = jwks
+                return jwks
+            except httpx.HTTPError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to fetch JWKS from Keycloak: {str(e)}"
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Error processing JWKS: {str(e)}"
+                )
+    return _jwks_cache
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+# Chuyển đổi JWK sang định dạng RSA
+def jwk_to_rsa_key(jwk):
+    try:
+        n = jwk['n']
+        e = jwk['e']
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    print("Creating token with payload:", data)
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        # Add padding for base64 decoding
+        n += '=' * (4 - len(n) % 4)
+        e += '=' * (4 - len(e) % 4)
+
+        # Decode base64url
+        n_bytes = base64.urlsafe_b64decode(n)
+        e_bytes = base64.urlsafe_b64decode(e)
+
+        # Convert bytes to integers
+        n_int = int.from_bytes(n_bytes, byteorder='big')
+        e_int = int.from_bytes(e_bytes, byteorder='big')
+        
+        # Create RSA public key
+        public_numbers = rsa.RSAPublicNumbers(e_int, n_int)
+        public_key = public_numbers.public_key()
+        
+        # Convert to PEM format
+        pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        return pem.decode('utf-8')
+    except Exception as e:
+        raise ValueError(f"Invalid JWK: {e}")
     
 
-def create_refresh_token(data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS))
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-
-def decode_access_token(token: str):
+# Hàm xác minh token
+async def verify_token(token: str):
     try:
-        print("Decoding token:", token)
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print("Decoded payload:", payload)
-        return payload
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired access token",
-            headers={"WWW-Authenticate": "Bearer"}
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+
+        if not kid:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token header: 'kid' missing",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        jwks = await get_jwks()
+
+        if not jwks or "keys" not in jwks:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="JWKS not available",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        rsa_key = None
+        for key in jwks["keys"]:
+            if (key["kid"] == kid and key["kty"] == "RSA" and key["use"] == "sig"):
+                rsa_key = jwk_to_rsa_key(key)
+                break
+        
+        if rsa_key is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unable to find appropriate key",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        payload = jwt.decode(
+            token,
+            rsa_key,
+            algorithms=["RS256"],
+            audience=settings.KEYCLOAK_CLIENT_ID,
+            options={"verify_signature": True, "verify_exp": True, "verify_aud": False}  # Có thể tắt verify_aud nếu không sử dụng
         )
 
-def decode_refresh_token(token: str):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"Token audience: {payload.get('aud')}")
+        print(f"Expected client ID: {settings.KEYCLOAK_CLIENT_ID}")
+        
         return payload
-    except JWTError:
+    
+    except JWTError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
-            headers={"WWW-Authenticate": "Bearer"}
+            detail=f"Invalid token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+            
+
+def get_user_info(payload: dict):
+    return {
+        "sub": payload.get("sub"),
+        "username": payload.get("preferred_username"),
+        "email": payload.get("email"),
+        "full_name": payload.get("name"),
+        "roles": payload.get("realm_access", {}).get("roles", [])
+    }

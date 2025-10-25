@@ -4,3 +4,4 @@ from .category import *
 from .author import *
 from .role import *
 from .token import *
+from .borrow import *

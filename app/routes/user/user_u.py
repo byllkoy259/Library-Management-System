@@ -16,8 +16,8 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 # Login user
 @router.post("/login", response_model=schemas.Token)
-def login_user(email: str, password: str, db: Session = Depends(get_db)):
-    return auth_service.login_user(email, password, db)
+async def login_user(email: str, password: str, db: Session = Depends(get_db)):
+    return await auth_service.login_user(email, password, db)
 
 
 # Update user details

@@ -1,78 +1,101 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from jose import JWTError
-from sqlalchemy.orm import Session
+import httpx
 
-from app.auth.jwt_handler import create_access_token, create_refresh_token, decode_access_token, decode_refresh_token
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.schemas.user import UserResponse
 from app.schemas.token import Token
-from app.utils.hashing import authenticate_user
+from app.config import settings
 
 router = APIRouter()
 
-
+# Endpoint để đăng nhập và nhận token
 @router.post("/token", response_model=Token)
-def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):    
+    # Gọi API Keycloak để lấy token
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token",
+                data={
+                    "grant_type": "password",
+                    "client_id": settings.KEYCLOAK_CLIENT_ID,
+                    "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
+                    "username": form_data.username,
+                    "password": form_data.password,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            tokens = response.json()
 
-
-@router.post("/refresh", response_model=Token)
-def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
-    try:
-        payload = decode_refresh_token(refresh_token)
-        user_id = payload.get("sub")
-        token_type = payload.get("type")  # Kiểm tra loại token
-        
-        if user_id is None or token_type != "refresh":
+            return {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens.get("refresh_token", ""),
+                "token_type": tokens["token_type"],
+            }
+        except httpx.HTTPStatusError as e:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate refresh token",
-                headers={"WWW-Authenticate": "Bearer"},
+                detail=f"Keycloak authentication failed: {e.response.text}",
             )
-            
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate refresh token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Kiểm tra user có tồn tại không
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
-    # Tạo token mới
-    new_access_token = create_access_token(data={"sub": str(user.id)})
-    new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    
-    return {
-        "access_token": new_access_token, 
-        "refresh_token": new_refresh_token, 
-        "token_type": "bearer"
-    }
 
 
+@router.post("/token/refresh", response_model=Token)
+async def refresh_access_token(refresh_token: str):
+    # Gọi API Keycloak để làm mới token
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": settings.KEYCLOAK_CLIENT_ID,
+                    "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
+                    "refresh_token": refresh_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            tokens = response.json()
+
+            return {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens.get("refresh_token", ""),
+                "token_type": tokens["token_type"],
+            }
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Keycloak token refresh failed: {e.response.text}",
+            )
+
+
+# Endpoint để lấy thông tin người dùng hiện tại
 @router.post("/users/me", response_model=UserResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+# Endpoint để đăng xuất (logout)
 @router.post("/logout")
-def logout(current_user: User = Depends(get_current_user)):
-    return {"msg": "Successfully logged out"}
+async def logout_user(refresh_token: str):
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/logout",
+                data={
+                    "client_id": settings.KEYCLOAK_CLIENT_ID,
+                    "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
+                    "refresh_token": refresh_token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            return {"detail": "Successfully logged out"}
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Keycloak logout failed: {e.response.text}",
+            )

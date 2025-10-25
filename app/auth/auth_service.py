@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 from fastapi import HTTPException, status
+import httpx
 from sqlalchemy.orm import Session
 
-from app.auth.jwt_handler import create_access_token, create_refresh_token
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.utils.hashing import hash_password, verify_password
+from app.config import settings
 
 # Register user
 def register_user(user_data: UserCreate, db: Session):
@@ -48,7 +49,7 @@ def register_user(user_data: UserCreate, db: Session):
 
 
 # Login user
-def login_user(username: str, password: str, db: Session):
+async def login_user(username: str, password: str, db: Session):
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(
@@ -56,14 +57,31 @@ def login_user(username: str, password: str, db: Session):
             detail="Invalid credentials"
         )
 
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
-
-    print(">>> User ID:", user.id)
-    print(">>> Generated Access Token:", access_token)
-    print(">>> Generated Refresh Token:", refresh_token)
-    
-    return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{settings.KEYCLOAK_URL}/realms/{settings.KEYCLOAK_REALM}/protocol/openid-connect/token",
+                data={
+                    "grant_type": "password",
+                    "client_id": settings.KEYCLOAK_CLIENT_ID,
+                    "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
+                    "username": username,
+                    "password": password,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            tokens = response.json()
+            return {
+                "access_token": tokens["access_token"],
+                "refresh_token": tokens.get("refresh_token", ""),
+                "token_type": tokens["token_type"],
+            }
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Keycloak authentication failed: {e.response.text}",
+            )
 
 
 # Update user details

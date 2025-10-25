@@ -2,6 +2,7 @@ from .user import *
 from .user.book_u import *
 from .user.category_u import *
 from .user.user_u import *
+from .user.borrow_u import *
 from .admin import *
 from .admin.author_a import *
 from .admin.book_a import *
