@@ -1,0 +1,126 @@
+.book-detail-page {
+  padding: 50px 0;
+  background-color: #fff;
+  flex: 1;
+}
+
+.book-detail-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 30px;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 50px;
+  align-items: flex-start;
+}
+
+.book-cover-container {
+  width: 100%;
+  position: sticky;
+  top: 100px; /* Dính lại khi cuộn, cách top 100px */
+}
+
+.book-cover-image {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.15);
+  object-fit: cover;
+}
+
+.book-info-container .book-title {
+  font-size: 2.8em;
+  font-weight: 700;
+  color: #2c3e50;
+  margin: 0 0 10px 0;
+  line-height: 1.2;
+}
+
+.book-info-container .book-author {
+  font-size: 1.2em;
+  color: #666;
+  margin: 0 0 25px 0;
+}
+
+.book-info-container .book-author a {
+  color: #3498db;
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.book-info-container .book-author a:hover {
+  text-decoration: underline;
+}
+
+.book-meta {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 25px;
+  font-size: 1em;
+  color: #555;
+  padding: 15px;
+  background-color: #f9fafb;
+  border-radius: 8px;
+}
+
+.book-description {
+  font-size: 1.1em;
+  line-height: 1.8;
+  color: #444;
+  margin-bottom: 40px;
+}
+
+.book-actions {
+  display: flex;
+  gap: 20px;
+}
+
+.btn-borrow, .btn-wishlist {
+  padding: 15px 35px;
+  font-size: 1.1em;
+  font-weight: 600;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-borrow {
+  background: linear-gradient(135deg, #FFCA28, #FFA000);
+  color: #fff;
+  box-shadow: 0 6px 25px rgba(255, 202, 40, 0.4);
+}
+
+.btn-borrow:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(255, 202, 40, 0.5);
+}
+
+.btn-wishlist {
+  background: transparent;
+  border: 2px solid #FFCA28;
+  color: #FFCA28;
+}
+
+.btn-wishlist:hover {
+  background: linear-gradient(135deg, #FFCA28, #FFA000);
+  color: #fff;
+  border-color: #FFA000;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .book-detail-container {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+  .book-cover-container {
+    position: static;
+    max-width: 250px;
+    margin: 0 auto;
+  }
+  .book-info-container .book-title {
+    font-size: 2.2em;
+  }
+}

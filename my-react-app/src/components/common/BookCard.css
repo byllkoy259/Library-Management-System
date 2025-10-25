@@ -1,0 +1,66 @@
+.book-card {
+  background-color: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+
+.book-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 12px 25px rgba(0, 0, 0, 0.1);
+}
+
+.book-card-image-container {
+  width: 100%;
+  padding-top: 140%; /* Tỷ lệ ảnh bìa sách */
+  position: relative;
+  background-color: #f0f0f0;
+}
+
+.book-card-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.book-card-content {
+  padding: 15px;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.book-card-title {
+  font-size: 1em;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0 0 5px 0;
+  line-height: 1.3;
+  /* Giới hạn 2 dòng */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-height: 2.6em; /* Đảm bảo chiều cao tối thiểu cho 2 dòng */
+}
+
+.book-card-author {
+  font-size: 0.85em;
+  color: #777;
+  margin: 0;
+  margin-top: auto;
+}
+
+.book-card-link {
+  text-decoration: none; /* Bỏ gạch chân của thẻ Link */
+  color: inherit; /* Kế thừa màu chữ */
+  display: block; /* Giúp thẻ Link chiếm toàn bộ không gian của card */
+}
